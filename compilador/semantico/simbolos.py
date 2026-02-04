@@ -55,7 +55,7 @@ class TabelaSimbolos:
 
     def declarar_variavel(self, nome, linha, coluna):
         """Declara uma nova variável no escopo atual"""
-        # Verifica se já existe no escopo atual
+        # reatribuir?
         if self.existe_no_escopo_atual(nome):
             raise Exception(
                 f"Erro semântico: Variável '{nome}' já declarada no escopo atual "
@@ -142,6 +142,8 @@ class TabelaSimbolos:
         
         return simbolo
 
+
+    #UTILITARIO
     def exibir(self):
         """Exibe o conteúdo da tabela de símbolos"""
         print("\n" + "="*60)

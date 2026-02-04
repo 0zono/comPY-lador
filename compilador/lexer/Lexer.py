@@ -1,4 +1,4 @@
-from lexer.Token import Token
+from .Token import Token
 
 palavras_reservadas = {
     "def": "DEF",

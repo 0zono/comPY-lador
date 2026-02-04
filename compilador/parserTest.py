@@ -1,5 +1,6 @@
 """
-Teste do Parser com código simples
+testa EXCLUSIVAMENTE O PARSER.
+por mais que o Pasrer.py também faça checagens semanticas, esse teste n usa elas
 """
 
 # Simulação das classes Token e Lexer para testar
