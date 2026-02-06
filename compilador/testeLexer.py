@@ -1,9 +1,13 @@
 from lexer.Lexer import Lexer
-from lexer.Token import Token
+
+
+def ler_arquivo(caminho):
+    with open(caminho, 'r', encoding='utf-8') as f:
+        return f.read()
 
 
 def main():
-    codigo = '2 == 1 != 3 >= 4 <= 5 = b\n "sup bitches" = str'
+    codigo = ler_arquivo("pog.py")
     lexer = Lexer(codigo)
 
     print("Tokens encontrados:\n")

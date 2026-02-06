@@ -1,4 +1,7 @@
-x = 10
+
+penis = 32
+
+x= 69
 y = input()
 
 if x > y:

@@ -165,13 +165,29 @@ class GeradorCodigo:
             self.backpatch(endereco_dsvf, self.endereco_atual())
     
     def gerar_programa(self, programa):
-        """Gera código completo"""
-        self.emitir("INPP")  # Inicializa programa
-        
-        for comando in programa:
-            self.gerar_comando(comando)
-        
-        self.emitir("PARA")  # Para execução
+        """
+        programa é um nó AST do tipo:
+        {
+            'tipo': 'programa',
+            'declaracoes': [...],
+            'comandos': [...]
+        }
+        """
+        if programa['tipo'] != 'programa':
+            raise Exception("AST inválida: esperado nó 'programa'")
+
+        self.emitir("INPP")
+
+        # 1. Declarações (dc_v)
+        for decl in programa.get('declaracoes', []):
+            self.gerar_comando(decl)
+
+        # 2. Comandos
+        for cmd in programa.get('comandos', []):
+            self.gerar_comando(cmd)
+
+        self.emitir("PARA")
+
     
     def salvar(self, arquivo):
         """Salva código em arquivo .obj"""

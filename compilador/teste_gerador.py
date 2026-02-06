@@ -2,48 +2,47 @@ from lexer.Lexer import Lexer
 from parser.Parser import Parser
 from gerador.gerador_cod import GeradorCodigo
 
+
 def ler_arquivo(caminho):
     with open(caminho, 'r', encoding='utf-8') as f:
         return f.read()
+
 
 def compilar(arquivo_fonte, arquivo_objeto):
     print("=" * 60)
     print("INICIANDO COMPILAÇÃO")
     print("=" * 60)
 
-    # 1. Leitura do código fonte
+    # 1. Código fonte
     codigo = ler_arquivo(arquivo_fonte)
     print("\n[1] Código fonte carregado")
 
-    # 2. Analisador Léxico
+    # 2. Lexer
     lexer = Lexer(codigo)
     print("[2] Lexer criado")
 
-    # 3. Analisador Sintático + Semântico
+    # 3. Parser (sintático + semântico)
     parser = Parser(lexer)
-    print("[3] Parser criado (com análise semântica)")
+    print("[3] Parser criado")
 
-    # Aqui ocorre TODA a validação sintática e semântica
     parser.programa()
     print("[4] Análise sintática e semântica OK")
 
-    # 4. Gerador de código
+    # 4. Gerador
     gerador = GeradorCodigo()
     print("[5] Gerador de código criado")
 
-    # ⚠️ AQUI DEPENDE DO SEU PARSER
-    # Se no futuro o parser retornar uma AST ou lista de comandos:
-    #
-    # programa_intermediario = parser.ast
-    # gerador.gerar_programa(programa_intermediario)
-    #
-    # Por enquanto, você pode deixar isso como placeholder:
-    print("[6] (Placeholder) Geração de código ainda não integrada ao parser")
+    # 5. AST → Código objeto
+    programa_intermediario = parser.ast
 
-    # 5. Salva código objeto
+    if not programa_intermediario:
+        raise Exception("AST vazia — nada para gerar")
+
+    gerador.gerar_programa(programa_intermediario)
+    print("[6] Código objeto gerado")
+
+    # 6. Salva e exibe
     gerador.salvar(arquivo_objeto)
-
-    # 6. Exibe código gerado (opcional)
     gerador.exibir()
 
     print("\n✓ COMPILAÇÃO FINALIZADA COM SUCESSO")
@@ -51,8 +50,4 @@ def compilar(arquivo_fonte, arquivo_objeto):
 
 
 if __name__ == "__main__":
-    # Arquivos de teste
-    arquivo_fonte = "pog.py"
-    arquivo_objeto = "programa1.obj"
-
-    compilar(arquivo_fonte, arquivo_objeto)
+    compilar("pog.py", "programa1.obj")
