@@ -97,12 +97,11 @@ class GeradorCodigo:
             self.emitir("LEIT")
     
     def gerar_comando(self, node):
-        """Gera código para comando"""
-        if node['tipo'] == 'declaracao':
-            # x = expressao
+        if node['tipo'] in ('declaracao', 'dc_v'):
             self.gerar_expressao(node['expressao'])
             endereco = self.novo_endereco(node['nome'])
             self.emitir("ARMZ", endereco)
+
             
         elif node['tipo'] == 'atribuicao':
             # x = expressao (variável já existe)
