@@ -9,24 +9,50 @@ class GeradorCodigo:
     # =========================
     # Utilitários
     # =========================
-
-    # =========================
-    # Persistência e Exibição
-    # =========================
+    def resolver_labels(self):
+        # Primeira passagem: mapear labels para endereços
+        label_map = {}
+        codigo_sem_labels = []
+        
+        for instrucao in self.codigo:
+            if instrucao.endswith(':'):
+                # É um label - mapeia para o próximo endereço disponível
+                label_name = instrucao[:-1]  # Remove ':'
+                label_map[label_name] = len(codigo_sem_labels)
+            else:
+                codigo_sem_labels.append(instrucao)
+        
+        # Segunda passagem: substituir referências a labels
+        codigo_final = []
+        for instrucao in codigo_sem_labels:
+            partes = instrucao.split()
+            
+            # Se a instrução tem argumento que começa com 'L', é referência a label
+            if len(partes) > 1 and partes[1].startswith('L'):
+                label_ref = partes[1]
+                if label_ref in label_map:
+                    # Substituir pelo endereço numérico
+                    instrucao = f"{partes[0]} {label_map[label_ref]}"
+            
+            codigo_final.append(instrucao)
+        
+        return codigo_final
 
     def salvar(self, caminho_arquivo):
         """Salva as instruções geradas em um arquivo .obj"""
         try:
+            codigo_final = self.resolver_labels() #se não os valores ficam como str ao inves de int
             with open(caminho_arquivo, 'w', encoding='utf-8') as f:
-                for instrucao in self.codigo:
+                for instrucao in codigo_final:
                     f.write(f"{instrucao}\n")
         except Exception as e:
             raise Exception(f"Erro ao salvar arquivo objeto: {e}")
 
     def exibir(self):
-        """Imprime o código gerado no console para depuração"""
+
+        codigo_final = self.resolver_labels()
         print("\n--- CÓDIGO OBJETO GERADO ---")
-        for i, instrucao in enumerate(self.codigo):
+        for i, instrucao in enumerate(codigo_final):
             print(f"{i:03d}: {instrucao}")
         print("----------------------------\n")
     
