@@ -5,18 +5,19 @@ Gerencia variáveis, funções e escopos
 
 class Simbolo:
     """Representa um símbolo (variável ou função)"""
-    def __init__(self, nome, tipo_simbolo, nivel_escopo, valor=None, parametros=None):
+    def __init__(self, nome, tipo_simbolo, nivel_escopo, valor=None, parametros=None, endereco=None):
         self.nome = nome
         self.tipo_simbolo = tipo_simbolo  # 'var', 'func'
         self.nivel_escopo = nivel_escopo
         self.valor = valor  # Para variáveis
         self.parametros = parametros or []  # Para funções (lista de nomes de parâmetros)
         self.inicializado = False
+        self.endereco = endereco  # Endereço de memória para variáveis
 
     def __repr__(self):
         if self.tipo_simbolo == 'func':
             return f"Funcao({self.nome}, params={self.parametros}, escopo={self.nivel_escopo})"
-        return f"Variavel({self.nome}, escopo={self.nivel_escopo}, inicializada={self.inicializado})"
+        return f"Variavel({self.nome}, escopo={self.nivel_escopo}, inicializada={self.inicializado}, endereco={self.endereco})"
 
 
 class TabelaSimbolos:
@@ -27,6 +28,13 @@ class TabelaSimbolos:
         self.pilha_escopos = [0]  # Pilha de escopos (0 = global)
         self.escopo_atual = 0
         self.contador_escopo = 0
+        self.proximo_endereco = 0  # Contador de endereços de memória
+
+    def alocar_endereco(self):
+        """Aloca um novo endereço de memória"""
+        endereco = self.proximo_endereco
+        self.proximo_endereco += 1
+        return endereco
 
     def entrar_escopo(self):
         """Entra em um novo escopo (ex: dentro de uma função)"""
@@ -36,39 +44,33 @@ class TabelaSimbolos:
         print(f"[Semântico] Entrando no escopo {self.escopo_atual}")
 
     def sair_escopo(self):
-        """Sai do escopo atual e remove símbolos desse escopo"""
+        """Sai do escopo atual (mas mantém símbolos para geração de código)"""
         escopo_antigo = self.pilha_escopos.pop()
         print(f"[Semântico] Saindo do escopo {escopo_antigo}")
         
-        # Remove símbolos do escopo que está sendo fechado
-        remover = []
-        for nome, lista_simbolos in self.simbolos.items():
-            # Remove símbolos do escopo atual
-            self.simbolos[nome] = [s for s in lista_simbolos if s.nivel_escopo != escopo_antigo]
-            if not self.simbolos[nome]:
-                remover.append(nome)
-        
-        for nome in remover:
-            del self.simbolos[nome]
+        # NÃO remove símbolos - eles são necessários para geração de código
+        # Os símbolos permanecem na tabela mesmo após sair do escopo
         
         self.escopo_atual = self.pilha_escopos[-1] if self.pilha_escopos else 0
 
     def declarar_variavel(self, nome, linha, coluna):
         """Declara uma nova variável no escopo atual"""
-        # reatribuir?
+        # Verifica redeclaração no escopo atual
         if self.existe_no_escopo_atual(nome):
             raise Exception(
                 f"Erro semântico: Variável '{nome}' já declarada no escopo atual "
                 f"→ linha {linha}, coluna {coluna}"
             )
         
-        simbolo = Simbolo(nome, 'var', self.escopo_atual)
+        # Aloca endereço de memória para a variável
+        endereco = self.alocar_endereco()
+        simbolo = Simbolo(nome, 'var', self.escopo_atual, endereco=endereco)
         
         if nome not in self.simbolos:
             self.simbolos[nome] = []
         self.simbolos[nome].append(simbolo)
         
-        print(f"[Semântico] Variável '{nome}' declarada no escopo {self.escopo_atual}")
+        print(f"[Semântico] Variável '{nome}' declarada no escopo {self.escopo_atual} com endereço {endereco}")
         return simbolo
 
     def declarar_funcao(self, nome, parametros, linha, coluna):
@@ -100,6 +102,19 @@ class TabelaSimbolos:
                 return simbolo
         
         return None
+
+    def get(self, nome):
+        """Retorna o endereço de memória de uma variável (busca em todos os escopos)"""
+        if nome not in self.simbolos:
+            raise Exception(f"Erro: Variável '{nome}' não encontrada")
+        
+        # Busca a PRIMEIRA variável com esse nome (qualquer escopo)
+        # Isso permite encontrar variáveis locais de funções mesmo após sair do escopo
+        for simbolo in reversed(self.simbolos[nome]):
+            if simbolo.tipo_simbolo == 'var':
+                return simbolo.endereco
+        
+        raise Exception(f"Erro: '{nome}' não é uma variável")
 
     def existe_no_escopo_atual(self, nome):
         """Verifica se existe no escopo atual"""
@@ -142,8 +157,6 @@ class TabelaSimbolos:
         
         return simbolo
 
-
-    #UTILITARIO
     def exibir(self):
         """Exibe o conteúdo da tabela de símbolos"""
         print("\n" + "="*60)

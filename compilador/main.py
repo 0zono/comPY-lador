@@ -48,12 +48,21 @@ def compilar(arquivo_fonte, arquivo_objeto):
         
         # GERAÇAO DE CODIGO
         print("\n[5/6] Geração de Código Objeto...")
-        gerador = GeradorCodigo()
+        #muita gambiarra, depois verificar se é a melhor soluc
+        tabela_enderecos = {}
+        prox_endereco = 0
+
+        for nome, lista_simbolos in parser.tabela_simbolos.simbolos.items():
+            simbolo = lista_simbolos[0]  
+            if simbolo.tipo_simbolo == 'var':
+                tabela_enderecos[nome] = prox_endereco
+                prox_endereco += 1
+        gerador = GeradorCodigo(parser.tabela_simbolos)
         
         if not parser.ast:
             raise Exception("AST vazia — nada para gerar")
         
-        gerador.gerar_programa(parser.ast)
+        gerador.gerar(parser.ast)
         print(f"       {len(gerador.codigo)} instruções geradas")
         
         # SALVAR
