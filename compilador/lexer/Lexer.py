@@ -1,4 +1,4 @@
-from .Token import Token
+from lexer.Token import Token
 
 palavras_reservadas = {
     "def": "DEF",
@@ -6,23 +6,24 @@ palavras_reservadas = {
     "if": "IF",
     "else": "ELSE",
     "while": "WHILE",
-    "input": "INPUT"
+    "input": "INPUT",
+    "read": "INPUT"  # ADICIONADO: aceitar 'read' como sinônimo de 'input'
 }
 
 operacoes = {
-            '+': "SOMA",
-            '-': "SUB",
-            '*': "MULT",
-            '/': "DIV",
-            '(': "ABREPAR",
-            ')': "FECHAPAR",
-            ',': "VIRG",
-            ':': "DOISPTS",
-            '=': "ATRIB",
-            '<': "MENOR",
-            '>': "MAIOR",
-            '!': "NEG"
-        }
+    '+': "SOMA",
+    '-': "SUB",
+    '*': "MULT",
+    '/': "DIV",
+    '(': "ABREPAR",
+    ')': "FECHAPAR",
+    ',': "VIRG",
+    ':': "DOISPTS",
+    '=': "ATRIB",
+    '<': "MENOR",
+    '>': "MAIOR",
+    '!': "NEG"
+}
 
 class Lexer:
     def __init__(self, texto):
@@ -32,11 +33,17 @@ class Lexer:
         self.linha = 1
         self.coluna = 1
 
-    #automato
     def nextToken(self):
-        # pula espacos vazios
+        # Pula espaços e comentários
         while not self.isEOF():
             c = self.texto[self.pos]
+            
+            # Verificar comentário triplo """
+            if c == '"' and self.pos + 2 < self.tamanho:
+                if self.texto[self.pos:self.pos+3] == '"""':
+                    self.pular_comentario_triplo()
+                    continue
+            
             if self.isEspaco(c):
                 self.nextChar()
             else:
@@ -45,18 +52,18 @@ class Lexer:
         if self.isEOF():
             return Token("EOF", "EOF", self.linha, self.coluna)
         
-        # att token position
+        # Atualizar token position
         token_linha = self.linha
         token_coluna = self.coluna
         
         c = self.nextChar()
         
-        # IDENT E KEYWORDS
+        # IDENTIFICADORES E KEYWORDS
         if self.isLetra(c):
             lexema = c
             while not self.isEOF():
                 c = self.texto[self.pos]
-                if self.isLetra(c) or self.isDigito(c):
+                if self.isLetra(c) or self.isDigito(c) or c == '_':
                     lexema += c
                     self.nextChar()
                 else:
@@ -67,7 +74,7 @@ class Lexer:
             else:
                 return Token("IDENT", lexema, token_linha, token_coluna)
         
-        # NUMEROS
+        # NÚMEROS
         elif self.isDigito(c):
             lexema = c
             tem_ponto = False
@@ -78,16 +85,17 @@ class Lexer:
                     lexema += c
                     self.nextChar()
                 elif c == '.' and not tem_ponto:
-                    tem_ponto = True
-                    lexema += c
-                    self.nextChar()
+                    # Verificar se há dígito depois do ponto
+                    if self.pos + 1 < self.tamanho and self.isDigito(self.texto[self.pos + 1]):
+                        tem_ponto = True
+                        lexema += c
+                        self.nextChar()
+                    else:
+                        break
                 else:
                     break
             
-            if lexema.endswith('.'):
-                return Token("ERRO", f"Número malformado: {lexema}", token_linha, token_coluna)
-            else:
-                return Token("NUM", lexema, token_linha, token_coluna)
+            return Token("NUM", lexema, token_linha, token_coluna)
         
         # STRINGS
         elif c == '"':
@@ -117,11 +125,11 @@ class Lexer:
             
             return Token("ERRO", "String não fechada", token_linha, token_coluna)
         
-        # OPERACOES
+        # OPERAÇÕES
         elif c in ['+', '-', '*', '/', '(', ')', ',', ':', '=', '<', '>', '!']:
             lexema = c
             
-            # igual, menorigual, maiorigual e diff
+            # Operadores compostos: ==, <=, >=, !=
             if not self.isEOF():
                 proximo = self.texto[self.pos]
                 
@@ -139,18 +147,35 @@ class Lexer:
                         self.nextChar()
                         return Token("DIFF", "!=", token_linha, token_coluna)
             
-            # resto
+            # Operador simples
             if lexema in operacoes:
                 return Token(operacoes[lexema], lexema, token_linha, token_coluna)
             else:
                 return Token("ERRO", lexema, token_linha, token_coluna)
         
-        # erro
+        # Caractere desconhecido
         else:
             return Token("ERRO", c, token_linha, token_coluna)
 
+    def pular_comentario_triplo(self):
+        """Pula comentário delimitado por três aspas duplas"""
+        # Consumir as três aspas iniciais
+        self.nextChar()  # primeira "
+        self.nextChar()  # segunda "
+        self.nextChar()  # terceira "
+        
+        # Procurar as três aspas finais
+        while not self.isEOF():
+            if self.pos + 2 < self.tamanho:
+                if self.texto[self.pos:self.pos+3] == '"""':
+                    # Consumir as três aspas finais
+                    self.nextChar()
+                    self.nextChar()
+                    self.nextChar()
+                    return
+            self.nextChar()
 
-    # metodos utilitarios
+    # Métodos utilitários
     def isLetra(self, c):
         return ('a' <= c <= 'z') or ('A' <= c <= 'Z')
     
@@ -158,7 +183,7 @@ class Lexer:
         return ('0' <= c <= '9')
     
     def isEspaco(self, c):
-        return c in [' ', '\n', '\t']
+        return c in [' ', '\n', '\t', '\r']
 
     def isEOF(self):
         return self.pos >= self.tamanho
@@ -167,7 +192,7 @@ class Lexer:
         c = self.texto[self.pos]
         self.pos += 1
         
-        # atualiza linha e coluna
+        # Atualiza linha e coluna
         if c == '\n':
             self.linha += 1
             self.coluna = 1
@@ -179,6 +204,5 @@ class Lexer:
     def back(self):
         if self.pos > 0:
             self.pos -= 1
-            # ajusta coluna ao voltar
             if self.coluna > 1:
                 self.coluna -= 1

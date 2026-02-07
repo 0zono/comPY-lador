@@ -16,6 +16,11 @@ class Parser:
         self.ast = None
 
     # util
+    def pular_lixo(self):
+        while self.token_atual.type in ["NEWLINE", "INDENT", "DEDENT"]:
+            self.token_atual = self.lexer.nextToken()
+
+
     def consumir(self, tipo):
         if self.token_atual.type == tipo:
             token = self.token_atual
@@ -31,6 +36,7 @@ class Parser:
     # PROGRAMA
     def programa(self):
         # <programa> -> <corpo>
+        self.pular_lixo()
         self.ast = self.corpo()
 
         print("\n[Tabela de Símbolos]")
@@ -45,7 +51,9 @@ class Parser:
     # CORPO
     def corpo(self):
         # <corpo> -> <dc> <comandos>
+        self.pular_lixo()
         declaracoes = self.dc()
+        self.pular_lixo()
         comandos = self.comandos()
 
         return {
@@ -98,7 +106,7 @@ class Parser:
         }
 
     # FUNÇÕES
-    def dc_f(self): #declara_func
+    def dc_f(self):
         # <dc_f> -> def ident <parametros> : <corpo_f>
         self.consumir("DEF")
         ident = self.consumir("IDENT")
@@ -106,8 +114,21 @@ class Parser:
 
         params = self.parametros()
         self.consumir("DOISPTS")
-        corpo = self.bloco()
 
+        self.tabela_simbolos.entrar_escopo()
+        
+
+
+        for nome in params:
+            simbolo = self.tabela_simbolos.declarar_variavel(
+                nome, ident.line, ident.column
+            )
+            simbolo.inicializado = True  
+
+        corpo = self.comandos()
+
+
+        self.tabela_simbolos.sair_escopo()
         self.funcao_atual = None
 
         return {
@@ -116,6 +137,9 @@ class Parser:
             'parametros': params,
             'corpo': corpo
         }
+
+    
+        
 
     def parametros(self):
         #<parametros> -> ( <lista_par> ) | λ
@@ -219,22 +243,21 @@ class Parser:
         if self.token_atual.type == "ATRIB":
             self.consumir("ATRIB")
             expr = self.expressao()
+
+            simbolo = self.tabela_simbolos.buscar(ident.value)
+            if simbolo is None:
+                simbolo = self.tabela_simbolos.declarar_variavel(
+                    ident.value, ident.line, ident.column
+                )
+
+            simbolo.inicializado = True
+
             return {
                 'tipo': 'atribuicao',
                 'nome': ident.value,
                 'expressao': expr
             }
 
-        elif self.token_atual.type == "ABREPAR":
-            args = self.lista_arg()
-            return {
-                'tipo': 'chamada_funcao',
-                'nome': ident.value,
-                'argumentos': args
-            }
-
-        else:
-            self.erro("Esperado '=' ou '(' após identificador")
 
     def lista_arg(self):
         #<lista_arg> -> ( <argumentos> ) | λ
@@ -258,18 +281,23 @@ class Parser:
 
     # BLOCO
     def bloco(self):
-        # <bloco> -> tabulacao <comandos>
         self.tabela_simbolos.entrar_escopo()
+
         comandos = self.comandos()
+
         self.tabela_simbolos.sair_escopo()
         return comandos
+
+
 
     # CONDIÇÃO
     def condicao(self):
         # <condicao> -> <expressao> <relacao> <expressao>
         esquerda = self.expressao()
+
         op = self.token_atual.value
-        self.consumir(self.token_atual.type)
+        self.consumir(self.token_atual.type)  # operador relacional
+
         direita = self.expressao()
 
         return {

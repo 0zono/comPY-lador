@@ -7,7 +7,7 @@ def ler_arquivo(caminho):
 
 
 def main():
-    codigo = ler_arquivo("pog.py")
+    codigo = ler_arquivo("E:\projetoComp\comPY-lador\exemplos\correto.python.txt")
     lexer = Lexer(codigo)
 
     print("Tokens encontrados:\n")
