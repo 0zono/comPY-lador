@@ -87,14 +87,30 @@ def instrucoes_exec(vm, instrucao):
             vm.push(0)
 
     elif opcode == "IMPR":
-        print(f"> {vm.pop()}")
+        print(f"PRINT:> {vm.pop()}")
 
     elif opcode == "INPP":
         vm.pilha = []
         vm.memoria = {}
+        vm.pc = 0
 
     elif opcode == "PARA":
         vm.executando = False
+
+    elif opcode == "PARAM":
+        vm.push(vm.pop())
+
+    elif opcode == "CHPR":
+        vm.push(vm.pc + 1)   # endereço de retorno
+        vm.pc = argumento - 1
+
+    elif opcode == "RTPR":
+        retorno = vm.pop()
+        vm.pc = retorno - 1
+
+
+
+
 
     else:
         raise Exception(f"Instrução desconhecida '{opcode}' no PC={vm.pc}")

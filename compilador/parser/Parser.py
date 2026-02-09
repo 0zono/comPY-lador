@@ -1,43 +1,44 @@
 from lexer.Lexer import Lexer
 from semantico.simbolos import TabelaSimbolos
 
-
 class Parser:
-    """
-    Parser Descendente Recursivo da linguagem LALG
-    com análise semântica integrada e geração de AST
-    """
-
     def __init__(self, lexer: Lexer):
         self.lexer = lexer
-        self.token_atual = self.lexer.nextToken()
+        self.buffer = []
+        self.token_atual = self.nextToken()
         self.tabela_simbolos = TabelaSimbolos()
-        self.funcao_atual = None
         self.ast = None
 
-    # ================= UTIL =================
+    def nextToken(self):
+        if self.buffer:
+            return self.buffer.pop(0)
+        return self.lexer.nextToken()
 
-    def pular_lixo(self):
-        while self.token_atual.type in ["NEWLINE", "INDENT", "DEDENT"]:
-            self.token_atual = self.lexer.nextToken()
+    def peekToken(self):
+        if not self.buffer:
+            self.buffer.append(self.nextToken())
+        return self.buffer[0]
 
     def consumir(self, tipo):
         if self.token_atual.type == tipo:
-            token = self.token_atual
-            self.token_atual = self.lexer.nextToken()
-            return token
+            tok = self.token_atual
+            self.token_atual = self.nextToken()
+            return tok
         self.erro(f"Esperado {tipo}, encontrado {self.token_atual.type}")
 
     def erro(self, msg):
-        raise Exception(
-            f"{msg} → linha {self.token_atual.line}, coluna {self.token_atual.column}"
-        )
+        raise Exception(f"{msg} (linha {self.token_atual.line}, coluna {self.token_atual.column})")
 
-    # ================= PROGRAMA =================
+    # =====================================================
+    # PROGRAMA
+    # =====================================================
 
     def programa(self):
-        self.pular_lixo()
-        self.ast = self.corpo()
+        corpo = self.corpo()
+        self.ast = {
+            "tipo": "programa",
+            **corpo
+        }
 
         print("\n[Tabela de Símbolos]")
         self.tabela_simbolos.exibir()
@@ -49,45 +50,42 @@ class Parser:
         return self.ast
 
     def corpo(self):
-        self.pular_lixo()
+        """
+        Primeiro lê todas as declarações (variáveis e funções),
+        depois lê os comandos do corpo principal.
+        """
         declaracoes = self.dc()
-        self.pular_lixo()
         comandos = self.comandos()
-
         return {
-            'tipo': 'programa',
-            'declaracoes': declaracoes,
-            'comandos': comandos
+            "declaracoes": declaracoes,
+            "comandos": comandos
         }
 
-    # ================= DECLARAÇÕES =================
+    # =====================================================
+    # DECLARAÇÕES
+    # =====================================================
 
     def dc(self):
-        self.pular_lixo()
-        declaracoes = []
+        decls = []
+        while self.token_atual.type in ("DEF", "IDENT"):
+            # Corrigido: tratar IDENT com valor 'def'
+            if self.token_atual.type == "DEF" or (self.token_atual.type == "IDENT" and self.token_atual.value == "def"):
+                decls.append(self.dc_f())
+            elif self._eh_dc_v():
+                decls.append(self.dc_v())
+            else:
+                break
+        return decls
 
-        if self.token_atual.type == "IDENT":
-            declaracoes.append(self.dc_v())
-            declaracoes.extend(self.mais_dc())
 
-        elif self.token_atual.type == "DEF":
-            declaracoes.append(self.dc_f())
-            declaracoes.extend(self.mais_dc())  # <<< FIX
-
-        return declaracoes
-
-    def mais_dc(self):
-        self.pular_lixo()
-        declaracoes = []
-
-        if self.token_atual.type in ["IDENT", "DEF"]:
-            declaracoes.extend(self.dc())
-
-        return declaracoes
+    def _eh_dc_v(self):
+        if self.token_atual.type != "IDENT":
+            return False
+        prox = self.peekToken()
+        return prox.type == "ATRIB"
 
     def dc_v(self):
         ident = self.consumir("IDENT")
-
         simbolo = self.tabela_simbolos.buscar(ident.value)
         if simbolo is None:
             simbolo = self.tabela_simbolos.declarar_variavel(
@@ -98,88 +96,59 @@ class Parser:
         expr = self.expressao()
         simbolo.inicializado = True
 
-        return {
-            'tipo': 'dc_v',
-            'nome': ident.value,
-            'expressao': expr
-        }
-
-    # ================= FUNÇÕES =================
+        return {"tipo": "dc_v", "nome": ident.value, "expressao": expr}
 
     def dc_f(self):
-        self.consumir("DEF")
-        ident = self.consumir("IDENT")
-        self.funcao_atual = ident.value
+        # Consome 'def' (pode ser token DEF ou IDENT com value 'def')
+        if self.token_atual.type == "DEF":
+            self.consumir("DEF")
+        elif self.token_atual.type == "IDENT" and self.token_atual.value == "def":
+            self.consumir("IDENT")
+        else:
+            self.erro("Esperado 'def' para declaração de função")
 
+        nome = self.consumir("IDENT").value
         params = self.parametros()
         self.consumir("DOISPTS")
 
-        # escopo da função
+        # entra em escopo da função
         self.tabela_simbolos.entrar_escopo()
+        for p in params:
+            s = self.tabela_simbolos.declarar_variavel(p, 0, 0)
+            s.inicializado = True
 
-        # declara parâmetros como variáveis locais inicializadas
-        for nome in params:
-            simbolo = self.tabela_simbolos.declarar_variavel(
-                nome, ident.line, ident.column
-            )
-            simbolo.inicializado = True
-
-        corpo = self.comandos()
-
+        corpo = self.bloco()
         self.tabela_simbolos.sair_escopo()
-        self.funcao_atual = None
 
-        return {
-            'tipo': 'funcao',
-            'nome': ident.value,
-            'parametros': params,
-            'corpo': corpo
-        }
+        return {"tipo": "funcao", "nome": nome, "parametros": params, "corpo": corpo}
+
 
 
     def parametros(self):
+        params = []
         if self.token_atual.type == "ABREPAR":
             self.consumir("ABREPAR")
-            params = self.lista_par()
+            if self.token_atual.type == "IDENT":
+                params.append(self.consumir("IDENT").value)
+                while self.token_atual.type == "VIRG":
+                    self.consumir("VIRG")
+                    params.append(self.consumir("IDENT").value)
             self.consumir("FECHAPAR")
-            return params
-        return []
-
-    def lista_par(self):
-        ident = self.consumir("IDENT")
-        params = [ident.value]
-        params.extend(self.mais_par())
         return params
 
-    def mais_par(self):
-        if self.token_atual.type == "VIRG":
-            self.consumir("VIRG")
-            return self.lista_par()
-        return []
-
-    # ================= COMANDOS =================
+    # =====================================================
+    # COMANDOS
+    # =====================================================
 
     def comandos(self):
-        self.pular_lixo()
-        comandos = []
-
-        if self.token_atual.type in ["PRINT", "IF", "WHILE", "IDENT"]:
-            comandos.append(self.comando())
-            comandos.extend(self.mais_comandos())
-
-        return comandos
-
-    def mais_comandos(self):
-        self.pular_lixo()
-        comandos = []
-
-        if self.token_atual.type in ["PRINT", "IF", "WHILE", "IDENT"]:
-            comandos.extend(self.comandos())
-
-        return comandos
+        cmds = []
+        while self.token_atual.type in ("PRINT", "IF", "WHILE", "IDENT"):
+            cmds.append(self.comando())
+        return cmds
 
     def comando(self):
-        self.pular_lixo()
+    # Debug opcional
+    # print("Parser: lendo comando", self.token_atual.type, getattr(self.token_atual, "value", ""))
 
         if self.token_atual.type == "PRINT":
             self.consumir("PRINT")
@@ -187,11 +156,8 @@ class Parser:
             ident = self.consumir("IDENT")
             self.consumir("FECHAPAR")
 
-            self.tabela_simbolos.verificar_inicializado(
-                ident.value, ident.line, ident.column
-            )
-
-            return {'tipo': 'print', 'variavel': ident.value}
+            self.tabela_simbolos.verificar_inicializado(ident.value, ident.line, ident.column)
+            return {"tipo": "print", "variavel": ident.value}
 
         elif self.token_atual.type == "IF":
             self.consumir("IF")
@@ -199,16 +165,14 @@ class Parser:
             self.consumir("DOISPTS")
             bloco = self.bloco()
             pfalsa = self.pfalsa()
-
-            return {'tipo': 'if', 'condicao': cond, 'then': bloco, 'else': pfalsa}
+            return {"tipo": "if", "condicao": cond, "then": bloco, "else": pfalsa}
 
         elif self.token_atual.type == "WHILE":
             self.consumir("WHILE")
             cond = self.condicao()
             self.consumir("DOISPTS")
-            bloco = self.bloco()  # <<< FIX
-
-            return {'tipo': 'while', 'condicao': cond, 'bloco': bloco}
+            bloco = self.bloco()
+            return {"tipo": "while", "condicao": cond, "bloco": bloco}
 
         elif self.token_atual.type == "IDENT":
             ident = self.consumir("IDENT")
@@ -217,125 +181,51 @@ class Parser:
         else:
             self.erro("Comando inválido")
 
-    # ================= RESTO IDENT =================
 
     def restoIdent(self, ident):
         if self.token_atual.type == "ATRIB":
             self.consumir("ATRIB")
             expr = self.expressao()
-
-            simbolo = self.tabela_simbolos.buscar(ident.value)
-            if simbolo is None:
-                simbolo = self.tabela_simbolos.declarar_variavel(
-                    ident.value, ident.line, ident.column
-                )
-            simbolo.inicializado = True
-
-            return {'tipo': 'atribuicao', 'nome': ident.value, 'expressao': expr}
+            s = self.tabela_simbolos.buscar(ident.value)
+            if s is None:
+                s = self.tabela_simbolos.declarar_variavel(ident.value, ident.line, ident.column)
+            s.inicializado = True
+            return {"tipo": "atribuicao", "nome": ident.value, "expressao": expr}
 
         elif self.token_atual.type == "ABREPAR":
+            # Se IDENT é seguido de parênteses, é chamada de função
             args = self.lista_arg()
-            return {'tipo': 'call', 'nome': ident.value, 'argumentos': args}
+            return {"tipo": "call", "nome": ident.value, "argumentos": args}
 
         else:
-            self.erro("Esperado atribuição ou chamada de função")
+            self.erro("Esperado '=' ou '(' após identificador")
 
-    def lista_arg(self):
-        self.consumir("ABREPAR")
-        args = self.argumentos()
-        self.consumir("FECHAPAR")
-        return args
 
-    def argumentos(self):
-        args = [self.expressao()]
-        args.extend(self.mais_argumentos())
-        return args
-
-    def mais_argumentos(self):
-        if self.token_atual.type == "VIRG":
-            self.consumir("VIRG")
-            return self.argumentos()
-        return []
-
-    # ================= BLOCO =================
+    # =====================================================
+    # BLOCO
+    # =====================================================
 
     def bloco(self):
+        """
+        Bloco de comandos (entrada em novo escopo)
+        """
         self.tabela_simbolos.entrar_escopo()
-        comandos = self.comandos()
+        cmds = []
+        while self.token_atual.type in ("PRINT", "IF", "WHILE", "IDENT"):
+            cmds.append(self.comando())
         self.tabela_simbolos.sair_escopo()
-        return comandos
+        return cmds
 
-    # ================= CONDIÇÃO =================
+    # =====================================================
+    # CONDIÇÃO
+    # =====================================================
 
     def condicao(self):
-        esquerda = self.expressao()
+        esq = self.expressao()
         op = self.token_atual.value
         self.consumir(self.token_atual.type)
-        direita = self.expressao()
-
-        return {
-            'tipo': 'binaria',
-            'operador': op,
-            'esquerda': esquerda,
-            'direita': direita
-        }
-
-    # ================= EXPRESSÕES =================
-
-    def expressao(self):
-        if self.token_atual.type == "INPUT":
-            self.consumir("INPUT")
-            self.consumir("ABREPAR")
-            self.consumir("FECHAPAR")
-            return {'tipo': 'input'}
-
-        expr = self.termo()
-        return self.outros_termos(expr)
-
-    def outros_termos(self, esquerda):
-        if self.token_atual.type in ["SOMA", "SUB"]:
-            op = self.token_atual.value
-            self.consumir(self.token_atual.type)
-            direita = self.termo()
-            expr = {'tipo': 'binaria', 'operador': op, 'esquerda': esquerda, 'direita': direita}
-            return self.outros_termos(expr)
-        return esquerda
-
-    def termo(self):
-        expr = self.fator()
-        return self.mais_fatores(expr)
-
-    def mais_fatores(self, esquerda):
-        if self.token_atual.type in ["MULT", "DIV"]:
-            op = self.token_atual.value
-            self.consumir(self.token_atual.type)
-            direita = self.fator()
-            expr = {'tipo': 'binaria', 'operador': op, 'esquerda': esquerda, 'direita': direita}
-            return self.mais_fatores(expr)
-        return esquerda
-
-    def fator(self):
-        if self.token_atual.type == "NUM":
-            token = self.consumir("NUM")
-            return {'tipo': 'numero', 'valor': token.value}
-
-        elif self.token_atual.type == "IDENT":
-            token = self.consumir("IDENT")
-            self.tabela_simbolos.verificar_inicializado(
-                token.value, token.line, token.column
-            )
-            return {'tipo': 'variavel', 'nome': token.value}
-
-        elif self.token_atual.type == "ABREPAR":
-            self.consumir("ABREPAR")
-            expr = self.expressao()
-            self.consumir("FECHAPAR")
-            return expr
-
-        else:
-            self.erro("Fator inválido")
-
-    # ================= ELSE =================
+        dir = self.expressao()
+        return {"tipo": "binaria", "operador": op, "esquerda": esq, "direita": dir}
 
     def pfalsa(self):
         if self.token_atual.type == "ELSE":
@@ -343,3 +233,61 @@ class Parser:
             self.consumir("DOISPTS")
             return self.bloco()
         return []
+
+    # =====================================================
+    # EXPRESSÕES
+    # =====================================================
+
+    def expressao(self):
+        if self.token_atual.type == "INPUT":
+            self.consumir("INPUT")
+            self.consumir("ABREPAR")
+            self.consumir("FECHAPAR")
+            return {"tipo": "input"}
+
+        expr = self.termo()
+        while self.token_atual.type in ("SOMA", "SUB"):
+            op = self.token_atual.value
+            self.consumir(self.token_atual.type)
+            expr = {"tipo": "binaria", "operador": op, "esquerda": expr, "direita": self.termo()}
+        return expr
+
+    def termo(self):
+        expr = self.fator()
+        while self.token_atual.type in ("MULT", "DIV"):
+            op = self.token_atual.value
+            self.consumir(self.token_atual.type)
+            expr = {"tipo": "binaria", "operador": op, "esquerda": expr, "direita": self.fator()}
+        return expr
+
+    def fator(self):
+        if self.token_atual.type == "NUM":
+            return {"tipo": "numero", "valor": self.consumir("NUM").value}
+
+        if self.token_atual.type == "IDENT":
+            tok = self.consumir("IDENT")
+            self.tabela_simbolos.verificar_inicializado(tok.value, tok.line, tok.column)
+            return {"tipo": "variavel", "nome": tok.value}
+
+        if self.token_atual.type == "ABREPAR":
+            self.consumir("ABREPAR")
+            expr = self.expressao()
+            self.consumir("FECHAPAR")
+            return expr
+
+        self.erro("Fator inválido")
+
+    # =====================================================
+    # LISTA DE ARGUMENTOS
+    # =====================================================
+
+    def lista_arg(self):
+        args = []
+        self.consumir("ABREPAR")
+        if self.token_atual.type != "FECHAPAR":
+            args.append(self.expressao())
+            while self.token_atual.type == "VIRG":
+                self.consumir("VIRG")
+                args.append(self.expressao())
+        self.consumir("FECHAPAR")
+        return args
