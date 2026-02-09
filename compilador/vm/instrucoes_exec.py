@@ -1,4 +1,4 @@
-# CRCT, CRVL, ARMZ, SOMA, SUBT, MULT, DIVI, INVE, CPIG, CDES, CPME, CPMA, CPMI, CMAI, DSVI, DSVF, CALL, PARAM, RTPR, ALME, PUSHER, LEIT, IMPR, INPP, PARA
+# instrucoes_exec.py - VERSÃO FINAL COM REGISTRADOR DE RETORNO
 
 def instrucoes_exec(vm, instrucao):
     partes = instrucao.split()
@@ -93,24 +93,27 @@ def instrucoes_exec(vm, instrucao):
         vm.pilha = []
         vm.memoria = {}
         vm.pc = 0
+        vm.registrador_retorno = None
 
     elif opcode == "PARA":
         vm.executando = False
 
     elif opcode == "PARAM":
-        vm.push(vm.pop())
+        # PARAM não faz nada - os valores já estão na pilha
+        pass
 
     elif opcode == "CHPR":
-        vm.push(vm.pc + 1)   # endereço de retorno
+        # CORRIGIDO: Salva endereço de retorno no REGISTRADOR
+        vm.registrador_retorno = vm.pc + 1
+        # Salta para função
         vm.pc = argumento - 1
 
     elif opcode == "RTPR":
-        retorno = vm.pop()
-        vm.pc = retorno - 1
-
-
-
-
+        # CORRIGIDO: Recupera endereço do REGISTRADOR
+        if vm.registrador_retorno is None:
+            raise Exception(f"Nenhum endereço de retorno salvo no PC={vm.pc}")
+        vm.pc = vm.registrador_retorno - 1
+        vm.registrador_retorno = None
 
     else:
         raise Exception(f"Instrução desconhecida '{opcode}' no PC={vm.pc}")

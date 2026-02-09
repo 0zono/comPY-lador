@@ -12,7 +12,11 @@ class Parser:
     def nextToken(self):
         if self.buffer:
             return self.buffer.pop(0)
-        return self.lexer.nextToken()
+        tok = self.lexer.nextToken()
+        # Pula NEWLINEs que não são importantes
+        while tok.type == "NEWLINE" and self.buffer and self.buffer[0].type == "NEWLINE":
+            tok = self.lexer.nextToken()
+        return tok
 
     def peekToken(self):
         if not self.buffer:
@@ -26,12 +30,15 @@ class Parser:
             return tok
         self.erro(f"Esperado {tipo}, encontrado {self.token_atual.type}")
 
+    def consumir_opcional(self, tipo):
+        """Consome o token se for do tipo especificado, senão ignora"""
+        if self.token_atual.type == tipo:
+            self.consumir(tipo)
+
     def erro(self, msg):
         raise Exception(f"{msg} (linha {self.token_atual.line}, coluna {self.token_atual.column})")
 
-    # =====================================================
     # PROGRAMA
-    # =====================================================
 
     def programa(self):
         corpo = self.corpo()
@@ -51,32 +58,39 @@ class Parser:
 
     def corpo(self):
         """
-        Primeiro lê todas as declarações (variáveis e funções),
-        depois lê os comandos do corpo principal.
+        Lê declarações (variáveis e funções) e depois comandos do corpo principal
         """
         declaracoes = self.dc()
+        
+        # Pula NEWLINEs antes dos comandos principais
+        while self.token_atual.type == "NEWLINE":
+            self.consumir("NEWLINE")
+        
         comandos = self.comandos()
         return {
             "declaracoes": declaracoes,
             "comandos": comandos
         }
 
-    # =====================================================
     # DECLARAÇÕES
-    # =====================================================
 
     def dc(self):
         decls = []
-        while self.token_atual.type in ("DEF", "IDENT"):
-            # Corrigido: tratar IDENT com valor 'def'
+        
+        while self.token_atual.type in ("DEF", "IDENT", "NEWLINE"):
+            # Pula NEWLINEs extras
+            if self.token_atual.type == "NEWLINE":
+                self.consumir("NEWLINE")
+                continue
+                
             if self.token_atual.type == "DEF" or (self.token_atual.type == "IDENT" and self.token_atual.value == "def"):
                 decls.append(self.dc_f())
             elif self._eh_dc_v():
                 decls.append(self.dc_v())
             else:
                 break
+                
         return decls
-
 
     def _eh_dc_v(self):
         if self.token_atual.type != "IDENT":
@@ -95,11 +109,13 @@ class Parser:
         self.consumir("ATRIB")
         expr = self.expressao()
         simbolo.inicializado = True
-
+        
+        self.consumir_opcional("NEWLINE")
+        
         return {"tipo": "dc_v", "nome": ident.value, "expressao": expr}
 
     def dc_f(self):
-        # Consome 'def' (pode ser token DEF ou IDENT com value 'def')
+        # Consome 'def'
         if self.token_atual.type == "DEF":
             self.consumir("DEF")
         elif self.token_atual.type == "IDENT" and self.token_atual.value == "def":
@@ -110,19 +126,25 @@ class Parser:
         nome = self.consumir("IDENT").value
         params = self.parametros()
         self.consumir("DOISPTS")
+        self.consumir_opcional("NEWLINE")
+        
+        # Espera INDENT para corpo da função
+        self.consumir("INDENT")
 
-        # entra em escopo da função
+        # Entra em escopo da função
         self.tabela_simbolos.entrar_escopo()
         for p in params:
             s = self.tabela_simbolos.declarar_variavel(p, 0, 0)
             s.inicializado = True
 
-        corpo = self.bloco()
+        corpo = self.bloco_indentado()
+        
+        # Espera DEDENT para sair do corpo da função
+        self.consumir("DEDENT")
+        
         self.tabela_simbolos.sair_escopo()
 
         return {"tipo": "funcao", "nome": nome, "parametros": params, "corpo": corpo}
-
-
 
     def parametros(self):
         params = []
@@ -136,20 +158,36 @@ class Parser:
             self.consumir("FECHAPAR")
         return params
 
-    # =====================================================
     # COMANDOS
-    # =====================================================
 
     def comandos(self):
+        """Lê comandos do corpo principal (sem INDENT/DEDENT)"""
         cmds = []
         while self.token_atual.type in ("PRINT", "IF", "WHILE", "IDENT"):
             cmds.append(self.comando())
+            self.consumir_opcional("NEWLINE")
+        return cmds
+
+    def bloco_indentado(self):
+        """Lê comandos dentro de um bloco indentado (até encontrar DEDENT)"""
+        self.tabela_simbolos.entrar_escopo()
+        cmds = []
+        
+        while self.token_atual.type not in ("DEDENT", "EOF"):
+            if self.token_atual.type == "NEWLINE":
+                self.consumir("NEWLINE")
+                continue
+                
+            if self.token_atual.type in ("PRINT", "IF", "WHILE", "IDENT"):
+                cmds.append(self.comando())
+                self.consumir_opcional("NEWLINE")
+            else:
+                break
+        
+        self.tabela_simbolos.sair_escopo()
         return cmds
 
     def comando(self):
-    # Debug opcional
-    # print("Parser: lendo comando", self.token_atual.type, getattr(self.token_atual, "value", ""))
-
         if self.token_atual.type == "PRINT":
             self.consumir("PRINT")
             self.consumir("ABREPAR")
@@ -163,7 +201,10 @@ class Parser:
             self.consumir("IF")
             cond = self.condicao()
             self.consumir("DOISPTS")
-            bloco = self.bloco()
+            self.consumir_opcional("NEWLINE")
+            self.consumir("INDENT")
+            bloco = self.bloco_indentado()
+            self.consumir("DEDENT")
             pfalsa = self.pfalsa()
             return {"tipo": "if", "condicao": cond, "then": bloco, "else": pfalsa}
 
@@ -171,7 +212,10 @@ class Parser:
             self.consumir("WHILE")
             cond = self.condicao()
             self.consumir("DOISPTS")
-            bloco = self.bloco()
+            self.consumir_opcional("NEWLINE")
+            self.consumir("INDENT")
+            bloco = self.bloco_indentado()
+            self.consumir("DEDENT")
             return {"tipo": "while", "condicao": cond, "bloco": bloco}
 
         elif self.token_atual.type == "IDENT":
@@ -180,7 +224,6 @@ class Parser:
 
         else:
             self.erro("Comando inválido")
-
 
     def restoIdent(self, ident):
         if self.token_atual.type == "ATRIB":
@@ -193,32 +236,13 @@ class Parser:
             return {"tipo": "atribuicao", "nome": ident.value, "expressao": expr}
 
         elif self.token_atual.type == "ABREPAR":
-            # Se IDENT é seguido de parênteses, é chamada de função
             args = self.lista_arg()
             return {"tipo": "call", "nome": ident.value, "argumentos": args}
 
         else:
             self.erro("Esperado '=' ou '(' após identificador")
 
-
-    # =====================================================
-    # BLOCO
-    # =====================================================
-
-    def bloco(self):
-        """
-        Bloco de comandos (entrada em novo escopo)
-        """
-        self.tabela_simbolos.entrar_escopo()
-        cmds = []
-        while self.token_atual.type in ("PRINT", "IF", "WHILE", "IDENT"):
-            cmds.append(self.comando())
-        self.tabela_simbolos.sair_escopo()
-        return cmds
-
-    # =====================================================
     # CONDIÇÃO
-    # =====================================================
 
     def condicao(self):
         esq = self.expressao()
@@ -231,12 +255,14 @@ class Parser:
         if self.token_atual.type == "ELSE":
             self.consumir("ELSE")
             self.consumir("DOISPTS")
-            return self.bloco()
+            self.consumir_opcional("NEWLINE")
+            self.consumir("INDENT")
+            bloco = self.bloco_indentado()
+            self.consumir("DEDENT")
+            return bloco
         return []
 
-    # =====================================================
     # EXPRESSÕES
-    # =====================================================
 
     def expressao(self):
         if self.token_atual.type == "INPUT":
@@ -277,9 +303,7 @@ class Parser:
 
         self.erro("Fator inválido")
 
-    # =====================================================
     # LISTA DE ARGUMENTOS
-    # =====================================================
 
     def lista_arg(self):
         args = []

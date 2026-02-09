@@ -7,7 +7,7 @@ palavras_reservadas = {
     "else": "ELSE",
     "while": "WHILE",
     "input": "INPUT",
-    "read": "INPUT"  # ADICIONADO: aceitar 'read' como sinônimo de 'input'
+    "read": "INPUT"
 }
 
 operacoes = {
@@ -32,33 +32,76 @@ class Lexer:
         self.pos = 0
         self.linha = 1
         self.coluna = 1
+        
+        # indent agora funciona
+        self.pilha_indentacao = [0]
+        self.tokens_pendentes = []
+        self.inicio_linha = True
+        self.nivel_parenteses = 0
 
     def nextToken(self):
-        # Pula espaços e comentários
+        
+        if self.tokens_pendentes:
+            return self.tokens_pendentes.pop(0)
+        
+        # Pula espacos e coments
         while not self.isEOF():
             c = self.texto[self.pos]
             
-            # Verificar comentário triplo """
+            # coment '''
             if c == '"' and self.pos + 2 < self.tamanho:
                 if self.texto[self.pos:self.pos+3] == '"""':
                     self.pular_comentario_triplo()
                     continue
             
-            if self.isEspaco(c):
+            # comentario de linha
+            if c == '#':
+                self.pular_ate_fim_linha()
+                continue
+            
+            # novalinha
+            if c == '\n':
                 self.nextChar()
-            else:
-                break
+                if self.nivel_parenteses == 0 and not self.inicio_linha:
+                    self.inicio_linha = True
+                continue
+            
+            # ini linha
+            if self.inicio_linha and c not in [' ', '\t', '\r', '\n']:
+                return self.processar_indentacao()
+            
+            
+            if c in [' ', '\t', '\r']:
+                self.nextChar()
+                continue
+            
+            break
         
         if self.isEOF():
+            
+            while len(self.pilha_indentacao) > 1:
+                self.pilha_indentacao.pop()
+                self.tokens_pendentes.append(Token("DEDENT", "", self.linha, self.coluna))
+            
+            if self.tokens_pendentes:
+                return self.tokens_pendentes.pop(0)
+            
             return Token("EOF", "EOF", self.linha, self.coluna)
         
-        # Atualizar token position
+        
         token_linha = self.linha
         token_coluna = self.coluna
-        
         c = self.nextChar()
         
-        # IDENTIFICADORES E KEYWORDS
+        
+        if c == '(':
+            self.nivel_parenteses += 1
+            return Token("ABREPAR", c, token_linha, token_coluna)
+        if c == ')':
+            self.nivel_parenteses -= 1
+            return Token("FECHAPAR", c, token_linha, token_coluna)
+        
+        # IDENTIFICADORES E PALAVRAS CHAVE
         if self.isLetra(c):
             lexema = c
             while not self.isEOF():
@@ -74,7 +117,7 @@ class Lexer:
             else:
                 return Token("IDENT", lexema, token_linha, token_coluna)
         
-        # NÚMEROS
+        # NUMEROS
         elif self.isDigito(c):
             lexema = c
             tem_ponto = False
@@ -85,7 +128,6 @@ class Lexer:
                     lexema += c
                     self.nextChar()
                 elif c == '.' and not tem_ponto:
-                    # Verificar se há dígito depois do ponto
                     if self.pos + 1 < self.tamanho and self.isDigito(self.texto[self.pos + 1]):
                         tem_ponto = True
                         lexema += c
@@ -125,11 +167,11 @@ class Lexer:
             
             return Token("ERRO", "String não fechada", token_linha, token_coluna)
         
-        # OPERAÇÕES
-        elif c in ['+', '-', '*', '/', '(', ')', ',', ':', '=', '<', '>', '!']:
+        # OPERACOES
+        elif c in ['+', '-', '*', '/', ',', ':', '=', '<', '>', '!']:
             lexema = c
             
-            # Operadores compostos: ==, <=, >=, !=
+            # Operadores de igualdade
             if not self.isEOF():
                 proximo = self.texto[self.pos]
                 
@@ -147,43 +189,90 @@ class Lexer:
                         self.nextChar()
                         return Token("DIFF", "!=", token_linha, token_coluna)
             
-            # Operador simples
             if lexema in operacoes:
                 return Token(operacoes[lexema], lexema, token_linha, token_coluna)
             else:
                 return Token("ERRO", lexema, token_linha, token_coluna)
         
-        # Caractere desconhecido
         else:
             return Token("ERRO", c, token_linha, token_coluna)
 
-    def pular_comentario_triplo(self):
-        """Pula comentário delimitado por três aspas duplas"""
-        # Consumir as três aspas iniciais
-        self.nextChar()  # primeira "
-        self.nextChar()  # segunda "
-        self.nextChar()  # terceira "
+    def processar_indentacao(self):
+        """Processa indentação no início de linha"""
+        self.inicio_linha = False
         
-        # Procurar as três aspas finais
+        
+        pos_backup = self.pos
+        
+        
+        while pos_backup > 0 and self.texto[pos_backup - 1] != '\n':
+            pos_backup -= 1
+        
+        
+        nivel_atual = 0
+        i = pos_backup
+        while i < self.tamanho and self.texto[i] in [' ', '\t']:
+            if self.texto[i] == ' ':
+                nivel_atual += 1
+            else: 
+                nivel_atual += 4
+            i += 1
+        
+        
+        if i < self.tamanho and self.texto[i] in ['\n', '#']:
+            return self.nextToken()
+        
+        nivel_anterior = self.pilha_indentacao[-1]
+        
+        if nivel_atual > nivel_anterior:
+            # INDENT
+            self.pilha_indentacao.append(nivel_atual)
+            return Token("INDENT", "", self.linha, 1)
+        
+        elif nivel_atual < nivel_anterior:
+            
+            dedents = []
+            while self.pilha_indentacao and self.pilha_indentacao[-1] > nivel_atual:
+                self.pilha_indentacao.pop()
+                dedents.append(Token("DEDENT", "", self.linha, 1))
+            
+            if not self.pilha_indentacao or self.pilha_indentacao[-1] != nivel_atual:
+                
+                return Token("ERRO", f"Indentação inválida (esperado {self.pilha_indentacao[-1] if self.pilha_indentacao else 0}, encontrado {nivel_atual})", self.linha, 1)
+            
+            
+            if len(dedents) > 1:
+                self.tokens_pendentes = dedents[1:]
+            return dedents[0]
+        
+        
+        return self.nextToken()
+
+    def pular_comentario_triplo(self):
+        
+        self.nextChar()
+        self.nextChar()
+        self.nextChar()
+        
         while not self.isEOF():
             if self.pos + 2 < self.tamanho:
                 if self.texto[self.pos:self.pos+3] == '"""':
-                    # Consumir as três aspas finais
                     self.nextChar()
                     self.nextChar()
                     self.nextChar()
                     return
             self.nextChar()
 
-    # Métodos utilitários
+    def pular_ate_fim_linha(self):
+        
+        while not self.isEOF() and self.texto[self.pos] != '\n':
+            self.nextChar()
+
     def isLetra(self, c):
         return ('a' <= c <= 'z') or ('A' <= c <= 'Z')
     
     def isDigito(self, c):
         return ('0' <= c <= '9')
-    
-    def isEspaco(self, c):
-        return c in [' ', '\n', '\t', '\r']
 
     def isEOF(self):
         return self.pos >= self.tamanho
@@ -192,7 +281,6 @@ class Lexer:
         c = self.texto[self.pos]
         self.pos += 1
         
-        # Atualiza linha e coluna
         if c == '\n':
             self.linha += 1
             self.coluna = 1
@@ -200,9 +288,3 @@ class Lexer:
             self.coluna += 1
             
         return c
-    
-    def back(self):
-        if self.pos > 0:
-            self.pos -= 1
-            if self.coluna > 1:
-                self.coluna -= 1

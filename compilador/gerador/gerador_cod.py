@@ -1,15 +1,11 @@
-# gerador_cod.py
+
 
 class GeradorCodigo:
     def __init__(self, tabela_simbolos):
         self.codigo = []
-        self.tabela = tabela_simbolos  # deve suportar get(nome) com escopo
+        self.tabela = tabela_simbolos
         self.rotulo = 0
         self.enderecos_funcoes = {}
-
-    # =========================
-    # Utilitários
-    # =========================
 
     def nova_label(self):
         lbl = self.rotulo
@@ -23,7 +19,6 @@ class GeradorCodigo:
         label_map = {}
         codigo_sem_labels = []
 
-        # 1ª passada: mapear labels
         for instrucao in self.codigo:
             if instrucao.endswith(":"):
                 label = instrucao[:-1]
@@ -42,18 +37,15 @@ class GeradorCodigo:
                 except ValueError:
                     return False
 
-        # 2ª passada: substituir labels por endereços
         codigo_final = []
         for instrucao in codigo_sem_labels:
             partes = instrucao.split()
-
             if len(partes) == 2:
                 op, arg = partes
                 if not eh_numero(arg):
                     if arg not in label_map:
                         raise Exception(f"Label não definida: {arg}")
                     instrucao = f"{op} {label_map[arg]}"
-
             codigo_final.append(instrucao)
 
         return codigo_final
@@ -71,48 +63,36 @@ class GeradorCodigo:
             print(f"{i:03d}: {instrucao}")
         print("----------------------------\n")
 
-    # =========================
-    # Entrada principal
-    # =========================
-
     def gerar(self, ast):
         self.emitir("INPP")
 
-        # =========================
-        # declarações globais
-        # =========================
-        for d in ast["declaracoes"]:
-            if d["tipo"] == "dc_v":
-                self.gerar_declaracao(d)
-
-        # =========================
-        # registrar funções antes de gerar chamadas
-        # =========================
+        # Registrar func
         for d in ast["declaracoes"]:
             if d["tipo"] == "funcao":
                 label = f"FUNC_{d['nome']}"
                 self.enderecos_funcoes[d['nome']] = label
 
-        # =========================
-        # gerar funções (código)
-        # =========================
+        # pula func
+        label_main = self.nova_label()
+        self.emitir(f"DSVI L{label_main}")
+
+        # armazena cod de func
         for d in ast["declaracoes"]:
             if d["tipo"] == "funcao":
                 self.gerar_funcao(d)
 
-        # =========================
-        # gerar corpo principal
-        # =========================
+        # basta ler
+        self.emitir(f"L{label_main}:")
+
+        # global variables
+        for d in ast["declaracoes"]:
+            if d["tipo"] == "dc_v":
+                self.gerar_declaracao(d)
+
         for cmd in ast.get("comandos", []):
             self.gerar_comando(cmd)
 
         self.emitir("PARA")
-
-
-
-    # =========================
-    # Declarações
-    # =========================
 
     def gerar_declaracao(self, no):
         self.gerar_expressao(no["expressao"])
@@ -121,41 +101,30 @@ class GeradorCodigo:
 
     def gerar_funcao(self, func):
         label = f"FUNC_{func['nome']}"
-        self.emitir(f"{label}:")  # rótulo da função
+        self.emitir(f"{label}:")
+        
 
-        # parâmetros: desempilha do topo da pilha para variáveis
         for param in reversed(func['parametros']):
             endereco = self.tabela.get(param)
             if endereco is None:
-                raise Exception(f"Parâmetro não encontrado na tabela de símbolos: {param}")
+                raise Exception(f"Parâmetro não encontrado: {param}")
             self.emitir(f"ARMZ {endereco}")
 
-        # corpo da função
+
         for cmd in func['corpo']:
             self.gerar_comando(cmd)
 
         self.emitir("RTPR")
 
-
-    # =========================
-    # Chamadas de função
-    # =========================
-
     def gerar_call(self, call):
-        # empilhar argumentos
         for arg in call['argumentos']:
             self.gerar_expressao(arg)
-            self.emitir("PARAM")
 
         label = self.enderecos_funcoes.get(call['nome'])
         if label is None:
             raise Exception(f"Função não definida: {call['nome']}")
 
         self.emitir(f"CHPR {label}")
-
-    # =========================
-    # Comandos
-    # =========================
 
     def gerar_comando(self, no):
         tipo = no["tipo"]
@@ -181,10 +150,6 @@ class GeradorCodigo:
 
         else:
             raise Exception(f"Comando não suportado: {tipo}")
-
-    # =========================
-    # Estruturas de controle
-    # =========================
 
     def gerar_while(self, no):
         inicio = self.nova_label()
@@ -217,10 +182,6 @@ class GeradorCodigo:
             self.gerar_comando(cmd)
 
         self.emitir(f"L{lbl_fim}:")
-
-    # =========================
-    # Expressões
-    # =========================
 
     def gerar_expressao(self, no):
         tipo = no["tipo"]
