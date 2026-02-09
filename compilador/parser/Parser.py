@@ -1,3 +1,5 @@
+# Parser.py - VERSÃO COMPLETA CORRIGIDA
+
 from lexer.Lexer import Lexer
 from semantico.simbolos import TabelaSimbolos
 
@@ -18,7 +20,7 @@ class Parser:
     # ================= UTIL =================
 
     def pular_lixo(self):
-        while self.token_atual.type in ["NEWLINE", "INDENT", "DEDENT"]:
+        while self.token_atual.type in ["NEWLINE", "INDENT"]:  # ← SEM "DEDENT"
             self.token_atual = self.lexer.nextToken()
 
     def consumir(self, tipo):
@@ -49,10 +51,40 @@ class Parser:
         return self.ast
 
     def corpo(self):
+        """
+        CORREÇÃO PRINCIPAL: Separar declarações de comandos corretamente
+        """
         self.pular_lixo()
-        declaracoes = self.dc()
+        
+        declaracoes = []
+        comandos = []
+        
+        # Processar declarações (variáveis e funções)
+        while self.token_atual.type in ["IDENT", "DEF"]:
+            if self.token_atual.type == "DEF":
+                # Declaração de função
+                declaracoes.append(self.dc_f())
+            elif self.token_atual.type == "IDENT":
+                # Pode ser declaração de variável ou comando
+                # Verificar se é declaração (tem = logo após IDENT)
+                # Fazer lookahead
+                prox_token = self.olhar_proximo()
+                if prox_token and prox_token.type == "ATRIB":
+                    # É declaração se a variável não existe ainda
+                    if self.tabela_simbolos.buscar(self.token_atual.value) is None:
+                        declaracoes.append(self.dc_v())
+                    else:
+                        # Variável já existe, é comando
+                        break
+                else:
+                    break
+            self.pular_lixo()
+        
+        # Processar comandos do corpo principal
         self.pular_lixo()
-        comandos = self.comandos()
+        while self.token_atual.type in ["PRINT", "IF", "WHILE", "IDENT"]:
+            comandos.append(self.comando())
+            self.pular_lixo()
 
         return {
             'tipo': 'programa',
@@ -60,9 +92,25 @@ class Parser:
             'comandos': comandos
         }
 
+    def olhar_proximo(self):
+        """Helper para fazer lookahead"""
+        # Salvar estado atual
+        pos_atual = self.lexer.pos
+        token_atual_salvo = self.token_atual
+        
+        # Pegar próximo token
+        proximo = self.lexer.nextToken()
+        
+        # Restaurar estado
+        self.lexer.pos = pos_atual
+        self.token_atual = token_atual_salvo
+        
+        return proximo
+
     # ================= DECLARAÇÕES =================
 
     def dc(self):
+        """DEPRECADO - usar corpo() diretamente"""
         self.pular_lixo()
         declaracoes = []
 
@@ -72,11 +120,12 @@ class Parser:
 
         elif self.token_atual.type == "DEF":
             declaracoes.append(self.dc_f())
-            declaracoes.extend(self.mais_dc())  # <<< FIX
+            declaracoes.extend(self.mais_dc())
 
         return declaracoes
 
     def mais_dc(self):
+        """DEPRECADO"""
         self.pular_lixo()
         declaracoes = []
 
@@ -86,6 +135,7 @@ class Parser:
         return declaracoes
 
     def dc_v(self):
+        """Declaração de variável"""
         ident = self.consumir("IDENT")
 
         simbolo = self.tabela_simbolos.buscar(ident.value)
@@ -107,6 +157,10 @@ class Parser:
     # ================= FUNÇÕES =================
 
     def dc_f(self):
+        """
+        Declaração de função
+        CORREÇÃO: Não criar escopo extra, processar corpo diretamente
+        """
         self.consumir("DEF")
         ident = self.consumir("IDENT")
         self.funcao_atual = ident.value
@@ -114,18 +168,35 @@ class Parser:
         params = self.parametros()
         self.consumir("DOISPTS")
 
-        # escopo da função
+        # Entra no escopo da função
         self.tabela_simbolos.entrar_escopo()
 
-        # declara parâmetros como variáveis locais inicializadas
+        # Declara parâmetros como variáveis locais inicializadas
         for nome in params:
             simbolo = self.tabela_simbolos.declarar_variavel(
                 nome, ident.line, ident.column
             )
             simbolo.inicializado = True
 
-        corpo = self.comandos()
+        # Processar corpo da função (sem criar novo escopo!)
+        self.pular_lixo()
+        
+        # Consumir INDENT se houver
+        if self.token_atual.type == "INDENT":
+            self.consumir("INDENT")
+        
+        # Processar comandos do corpo
+        corpo = []
+        while self.token_atual.type not in ["DEDENT", "EOF", "DEF"]:
+            if self.token_atual.type in ["PRINT", "IF", "WHILE", "IDENT"]:
+                corpo.append(self.comando())
+            self.pular_lixo()
+        
+        # Consumir DEDENT se houver
+        if self.token_atual.type == "DEDENT":
+            self.consumir("DEDENT")
 
+        # Sai do escopo da função
         self.tabela_simbolos.sair_escopo()
         self.funcao_atual = None
 
@@ -135,7 +206,6 @@ class Parser:
             'parametros': params,
             'corpo': corpo
         }
-
 
     def parametros(self):
         if self.token_atual.type == "ABREPAR":
@@ -206,7 +276,7 @@ class Parser:
             self.consumir("WHILE")
             cond = self.condicao()
             self.consumir("DOISPTS")
-            bloco = self.bloco()  # <<< FIX
+            bloco = self.bloco()
 
             return {'tipo': 'while', 'condicao': cond, 'bloco': bloco}
 
